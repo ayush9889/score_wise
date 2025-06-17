@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Menu, BarChart3, RefreshCw, AlertCircle, Trophy, UserPlus, X, Wifi, WifiOff, User, Share2, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Menu, BarChart3, RefreshCw, AlertCircle, Trophy, UserPlus, X, Wifi, WifiOff, User, Share2, MessageCircle, Cloud, CloudOff, Save } from 'lucide-react';
 import { Match, Ball, Player } from '../types/cricket';
 import { CompactScoreDisplay } from './CompactScoreDisplay';
 import { ScoringPanel } from './ScoringPanel';
@@ -8,9 +8,9 @@ import { InningsBreakModal } from './InningsBreakModal';
 import { InningsSetupModal } from './InningsSetupModal';
 import { CricketEngine } from '../services/cricketEngine';
 import { storageService } from '../services/storage';
+import { cloudStorageService } from '../services/cloudStorageService';
 import { ScorecardModal } from './ScorecardModal';
 import { motion, AnimatePresence } from 'framer-motion';
-import { cloudStorageService } from '../services/cloudStorageService';
 import { authService } from '../services/authService';
 import { PDFService } from '../services/pdfService';
 import { DetailedScorecardModal } from './DetailedScorecardModal';
@@ -58,6 +58,8 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
   const [needsBowlerChange, setNeedsBowlerChange] = useState(false);
   const [needsNewBatsman, setNeedsNewBatsman] = useState(false);
   const [cloudSyncDisabled, setCloudSyncDisabled] = useState(false);
+  const [lastCloudSave, setLastCloudSave] = useState<Date | null>(null);
+  const [autoSaveInterval, setAutoSaveInterval] = useState<NodeJS.Timeout | null>(null);
 
   // Add new state for players
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
@@ -68,6 +70,8 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
     const handleOnline = () => {
       setIsOnline(true);
       cloudStorageService.goOnline();
+      setSaveError(null);
+      setCloudSyncDisabled(false);
     };
     
     const handleOffline = () => {
@@ -105,7 +109,8 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
       try {
         if (isOnline) {
           const savedMatch = await cloudStorageService.getMatch(initialMatch.id);
-          if (savedMatch) {
+          if (savedMatch && savedMatch.balls && savedMatch.balls.length > match.balls.length) {
+            console.log('🔄 Loading more recent match state from cloud');
             setMatch(savedMatch);
           }
         }
@@ -116,18 +121,83 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
     loadMatch();
   }, [initialMatch.id, isOnline]);
 
-  // Save match to cloud storage whenever it changes
+  // Auto-save functionality
   useEffect(() => {
-    const saveMatch = async () => {
+    const saveMatchWithRetry = async (retryAttempt = 0) => {
+      if (cloudSyncDisabled) return;
+      
       try {
+        setIsSaving(true);
+        setSaveError(null);
+        
+        // Save to local storage first (always works)
         await storageService.saveMatchState(match);
-        console.log('Match state saved successfully');
+        
+        // Try cloud save if online
+        if (isOnline) {
+          await cloudStorageService.saveMatch(match);
+          setLastCloudSave(new Date());
+          setRetryCount(0);
+          console.log('✅ Match auto-saved to cloud successfully');
+        }
       } catch (error) {
-        console.error('Failed to save match state:', error);
+        console.error('❌ Auto-save failed:', error);
+        
+        if (retryAttempt < 3 && isOnline) {
+          console.log(`🔄 Retrying auto-save (attempt ${retryAttempt + 1}/3)`);
+          setRetryCount(retryAttempt + 1);
+          setTimeout(() => saveMatchWithRetry(retryAttempt + 1), 2000 * (retryAttempt + 1));
+        } else {
+          setSaveError(isOnline ? 'Cloud save failed. Match saved locally.' : 'Offline - saved locally only');
+          if (retryAttempt >= 3) {
+            setCloudSyncDisabled(true);
+          }
+        }
+      } finally {
+        setIsSaving(false);
       }
     };
-    saveMatch();
-  }, [match]);
+
+    // Debounced auto-save
+    if (autoSaveInterval) {
+      clearTimeout(autoSaveInterval);
+    }
+    
+    const newInterval = setTimeout(() => {
+      saveMatchWithRetry();
+    }, 2000); // Save 2 seconds after last change
+    
+    setAutoSaveInterval(newInterval);
+
+    return () => {
+      if (newInterval) {
+        clearTimeout(newInterval);
+      }
+    };
+  }, [match, isOnline, cloudSyncDisabled]);
+
+  // Manual save function
+  const handleManualSave = async () => {
+    try {
+      setIsSaving(true);
+      setSaveError(null);
+      
+      await storageService.saveMatchState(match);
+      
+      if (isOnline) {
+        await cloudStorageService.saveMatch(match);
+        setLastCloudSave(new Date());
+        alert('Match saved to cloud successfully!');
+      } else {
+        alert('Match saved locally. Will sync when online.');
+      }
+    } catch (error) {
+      console.error('Manual save failed:', error);
+      setSaveError('Save failed. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Calculate remaining runs and balls
   useEffect(() => {
@@ -175,6 +245,16 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
             
             // Save to storage
             await storageService.savePlayer(updatedPlayer);
+            
+            // Save to cloud if online
+            if (isOnline) {
+              try {
+                await cloudStorageService.savePlayer(updatedPlayer);
+              } catch (error) {
+                console.warn('Failed to save player to cloud:', error);
+              }
+            }
+            
             console.log(`Stats updated for ${player.name}:`, {
               matches: updatedStats.matchesPlayed,
               runs: updatedStats.runsScored,
@@ -195,7 +275,7 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
     };
 
     updatePlayerStats();
-  }, [match.isCompleted]);
+  }, [match.isCompleted, isOnline]);
 
   const handleInningsTransition = () => {
     setShowInningsBreak(true);
@@ -265,6 +345,16 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
       };
       
       await storageService.saveMatchState(completedMatch);
+      
+      // Save to cloud if online
+      if (isOnline) {
+        try {
+          await cloudStorageService.saveMatch(completedMatch);
+        } catch (error) {
+          console.warn('Failed to save completed match to cloud:', error);
+        }
+      }
+      
       await storageService.clearIncompleteMatches();
       onMatchComplete(completedMatch);
     } catch (error) {
@@ -540,6 +630,21 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
           <div className={`p-1 rounded-lg ${isOnline ? 'text-green-600' : 'text-red-600'}`}>
             {isOnline ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
           </div>
+          
+          {/* Cloud Status */}
+          <div className={`p-1 rounded-lg ${lastCloudSave ? 'text-blue-600' : 'text-gray-400'}`}>
+            {lastCloudSave ? <Cloud className="w-4 h-4" /> : <CloudOff className="w-4 h-4" />}
+          </div>
+          
+          {/* Manual Save Button */}
+          <button
+            onClick={handleManualSave}
+            disabled={isSaving}
+            className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+            title="Manual Save"
+          >
+            <Save className={`w-4 h-4 text-gray-600 ${isSaving ? 'animate-pulse' : ''}`} />
+          </button>
           
           {/* Share Scoreboard */}
           {match.isCompleted && (
@@ -972,11 +1077,11 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
         {isSaving && (
           <div className="bg-blue-100 text-blue-800 px-4 py-2 rounded-lg shadow-md flex items-center space-x-2">
             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-800"></div>
-            <span>Saving to cloud...</span>
+            <span>Saving...</span>
           </div>
         )}
         {saveError && (
-          <div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-lg shadow-md flex items-center space-x-2">
+          <div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-lg shadow-md flex items-center space-x-2 mb-2">
             <AlertCircle className="w-4 h-4" />
             <span className="text-sm">{saveError}</span>
             {retryCount > 0 && (
@@ -1005,6 +1110,12 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
           <div className="bg-orange-100 text-orange-800 px-4 py-2 rounded-lg shadow-md flex items-center space-x-2 mb-2">
             <WifiOff className="w-4 h-4" />
             <span className="text-sm">Offline Mode</span>
+          </div>
+        )}
+        {lastCloudSave && (
+          <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg shadow-md flex items-center space-x-2 mb-2">
+            <Cloud className="w-4 h-4" />
+            <span className="text-xs">Last saved: {lastCloudSave.toLocaleTimeString()}</span>
           </div>
         )}
       </div>

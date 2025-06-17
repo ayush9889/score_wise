@@ -10,9 +10,10 @@ import { DetailedScorecardModal } from './components/DetailedScorecardModal';
 import { Match, Player } from './types/cricket';
 import { User, Group } from './types/auth';
 import { storageService } from './services/storage';
+import { cloudStorageService } from './services/cloudStorageService';
 import { authService } from './services/authService';
 import { PDFService } from './services/pdfService';
-import { Trophy, BarChart3, Play, Award, Users, UserPlus, LogIn, LogOut, Crown, Sparkles, Target, Zap, Shield, Share2, MessageCircle } from 'lucide-react';
+import { Trophy, BarChart3, Play, Award, Users, UserPlus, LogIn, LogOut, Crown, Sparkles, Target, Zap, Shield, Share2, MessageCircle, Cloud, CloudOff, RefreshCw } from 'lucide-react';
 
 type AppState = 'home' | 'auth' | 'group-management' | 'admin-dashboard' | 'match-setup' | 'live-scoring' | 'dashboard' | 'match-complete';
 
@@ -26,6 +27,11 @@ function App() {
   const [showAddPlayerModal, setShowAddPlayerModal] = useState(false);
   const [showDetailedScorecard, setShowDetailedScorecard] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [connectionStatus, setConnectionStatus] = useState<{
+    online: boolean;
+    firebaseWorking: boolean;
+    lastSync?: Date;
+  }>({ online: false, firebaseWorking: false });
 
   useEffect(() => {
     initializeApp();
@@ -45,6 +51,10 @@ function App() {
           setCurrentGroup(group);
         }
       }
+      
+      // Check connection status
+      const status = await cloudStorageService.checkConnection();
+      setConnectionStatus(status);
       
       setIsInitialized(true);
     } catch (error) {
@@ -89,6 +99,11 @@ function App() {
     
     setCurrentMatch(match);
     setCurrentState('match-complete');
+  };
+
+  const handleResumeMatch = (match: Match) => {
+    setCurrentMatch(match);
+    setCurrentState('live-scoring');
   };
 
   const handleBackToHome = () => {
@@ -136,6 +151,11 @@ function App() {
             </div>
             
             <div className="flex items-center space-x-3">
+              {/* Connection Status */}
+              <div className={`p-2 rounded-lg ${connectionStatus.online ? 'text-green-400' : 'text-red-400'}`}>
+                {connectionStatus.firebaseWorking ? <Cloud className="w-5 h-5" /> : <CloudOff className="w-5 h-5" />}
+              </div>
+              
               <button
                 onClick={() => setShowAddPlayerModal(true)}
                 className="p-3 bg-white/10 backdrop-blur-sm rounded-xl hover:bg-white/20 transition-all duration-300 border border-white/20"
@@ -190,6 +210,18 @@ function App() {
           </div>
         </div>
 
+        {/* Connection Status Banner */}
+        {!connectionStatus.online && (
+          <div className="relative z-10 mx-6 mb-4">
+            <div className="bg-orange-100/20 backdrop-blur-sm border border-orange-400/30 rounded-xl p-4 max-w-6xl mx-auto">
+              <div className="flex items-center text-orange-200">
+                <CloudOff className="w-5 h-5 mr-2" />
+                <span className="text-sm">You're offline - matches will sync when connection is restored</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Hero Section */}
         <div className="relative z-10 px-6 pb-12">
           <div className="max-w-4xl mx-auto text-center">
@@ -205,7 +237,7 @@ function App() {
               </h1>
               
               <p className="text-xl text-purple-200 mb-8 max-w-2xl mx-auto leading-relaxed">
-                The ultimate cricket scoring app for community matches. Fast, accurate, and beautifully designed.
+                The ultimate cricket scoring app for community matches. Fast, accurate, and beautifully designed with cloud backup.
               </p>
               
               {currentUser && currentGroup && (
@@ -214,6 +246,13 @@ function App() {
                   <span className="text-white text-sm">Signed in as <span className="font-semibold">{currentUser.name}</span></span>
                   <span className="text-purple-300 text-sm">•</span>
                   <span className="text-purple-300 text-sm">{currentGroup.name}</span>
+                  {connectionStatus.firebaseWorking && (
+                    <>
+                      <span className="text-purple-300 text-sm">•</span>
+                      <Cloud className="w-4 h-4 text-blue-400" />
+                      <span className="text-blue-300 text-sm">Cloud Sync</span>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -257,7 +296,7 @@ function App() {
                     <BarChart3 className="w-8 h-8 text-white" />
                   </div>
                   <h3 className="text-2xl font-bold text-white mb-3">Dashboard</h3>
-                  <p className="text-purple-200">View comprehensive stats, leaderboards & match history</p>
+                  <p className="text-purple-200">View comprehensive stats, leaderboards & match history with cloud sync</p>
                 </div>
               </button>
 
@@ -331,10 +370,10 @@ function App() {
 
                 <div className="group bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-500 border border-white/20 hover:border-blue-400/50">
                   <div className="bg-gradient-to-r from-blue-500 to-cyan-500 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform duration-300">
-                    <Zap className="w-8 h-8 text-white" />
+                    <Cloud className="w-8 h-8 text-white" />
                   </div>
-                  <h3 className="text-xl font-bold text-white mb-4">Smart Analytics</h3>
-                  <p className="text-purple-200 leading-relaxed">Automatic player tracking and personalized dashboards with insights</p>
+                  <h3 className="text-xl font-bold text-white mb-4">Cloud Backup & Resume</h3>
+                  <p className="text-purple-200 leading-relaxed">Never lose your match data. Resume scoring from any device, anywhere</p>
                 </div>
 
                 <div className="group bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-500 border border-white/20 hover:border-orange-400/50">
@@ -353,6 +392,11 @@ function App() {
                 <Trophy className="w-5 h-5 text-yellow-400" />
                 <span className="text-purple-200 text-sm font-medium">Perfect for club matches, tournaments & practice games</span>
               </div>
+              {connectionStatus.lastSync && (
+                <div className="mt-4 text-sm text-purple-300">
+                  Last synced: {connectionStatus.lastSync.toLocaleString()}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -399,7 +443,7 @@ function App() {
   }
 
   if (currentState === 'dashboard') {
-    return <Dashboard onBack={handleBackToHome} />;
+    return <Dashboard onBack={handleBackToHome} onResumeMatch={handleResumeMatch} />;
   }
 
   if (currentState === 'match-complete' && currentMatch) {
