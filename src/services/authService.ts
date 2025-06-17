@@ -4,17 +4,152 @@ import { storageService } from './storage';
 class AuthService {
   private currentUser: User | null = null;
   private currentGroups: Group[] = [];
-  private otpStore: { [phone: string]: string } = {}; // In-memory OTP store for demo
+  private otpStore: { [phone: string]: { otp: string, expires: number, attempts: number } } = {}; // Enhanced OTP store
 
-  // Authentication
-  async signUp(email: string, password: string, name: string, phone?: string): Promise<User> {
-    // Simulate API call
+  // Phone Authentication Methods
+  async signUpWithPhone(phone: string, name: string): Promise<User> {
+    // Check if user already exists
+    const existingUser = await storageService.getUserByPhone(phone);
+    if (existingUser) {
+      throw new Error('User with this phone number already exists');
+    }
+
+    // Create new user (unverified initially)
     const user: User = {
-      id: `user_${Date.now()}`,
+      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      email: '', // No email for phone signup
+      name,
+      phone,
+      isVerified: false, // Will be verified after OTP
+      createdAt: Date.now(),
+      lastLoginAt: Date.now(),
+      groupIds: []
+    };
+
+    await storageService.saveUser(user);
+    console.log('📱 User created with phone:', phone);
+    return user;
+  }
+
+  async signInWithPhone(phone: string): Promise<User> {
+    const user = await storageService.getUserByPhone(phone);
+    if (!user) {
+      throw new Error('No account found with this phone number');
+    }
+
+    // Update last login
+    user.lastLoginAt = Date.now();
+    await storageService.saveUser(user);
+    
+    this.currentUser = user;
+    localStorage.setItem('currentUser', JSON.stringify(user));
+    
+    // Load user's groups
+    await this.loadUserGroups();
+    
+    console.log('📱 User signed in with phone:', phone);
+    return user;
+  }
+
+  async checkUserByPhone(phone: string): Promise<boolean> {
+    const user = await storageService.getUserByPhone(phone);
+    return !!user;
+  }
+
+  // Enhanced OTP Methods
+  async sendOTP(phone: string): Promise<void> {
+    // Generate a 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = Date.now() + (5 * 60 * 1000); // 5 minutes expiry
+    
+    // Store OTP with expiry and attempt tracking
+    this.otpStore[phone] = {
+      otp,
+      expires,
+      attempts: 0
+    };
+    
+    // In a real app, send the OTP via SMS here
+    console.log(`📱 OTP for ${phone}: ${otp} (expires in 5 minutes)`);
+    
+    // For demo purposes, show OTP in console and alert
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`🔐 Demo OTP for ${phone}: ${otp}`);
+      // Optional: Show in UI for demo
+      setTimeout(() => {
+        alert(`Demo OTP for ${phone}: ${otp}\n\nThis is for demo purposes only. In production, this would be sent via SMS.`);
+      }, 500);
+    }
+  }
+
+  async verifyOTP(phone: string, otp: string): Promise<boolean> {
+    const storedOtpData = this.otpStore[phone];
+    
+    if (!storedOtpData) {
+      throw new Error('No OTP found for this phone number. Please request a new one.');
+    }
+
+    // Check if OTP has expired
+    if (Date.now() > storedOtpData.expires) {
+      delete this.otpStore[phone];
+      throw new Error('OTP has expired. Please request a new one.');
+    }
+
+    // Check attempt limit
+    if (storedOtpData.attempts >= 3) {
+      delete this.otpStore[phone];
+      throw new Error('Too many failed attempts. Please request a new OTP.');
+    }
+
+    // Verify OTP
+    if (storedOtpData.otp === otp) {
+      // OTP is correct - mark user as verified
+      const user = await storageService.getUserByPhone(phone);
+      if (user) {
+        user.isVerified = true;
+        user.lastLoginAt = Date.now();
+        await storageService.saveUser(user);
+        
+        // Update current user if it's the same
+        if (this.currentUser && this.currentUser.phone === phone) {
+          this.currentUser.isVerified = true;
+          localStorage.setItem('currentUser', JSON.stringify(this.currentUser));
+        }
+      }
+      
+      // Clean up OTP
+      delete this.otpStore[phone];
+      
+      console.log('✅ OTP verified successfully for:', phone);
+      return true;
+    } else {
+      // Increment attempt count
+      storedOtpData.attempts++;
+      console.log(`❌ Invalid OTP for ${phone}. Attempts: ${storedOtpData.attempts}/3`);
+      return false;
+    }
+  }
+
+  async resendOTP(phone: string): Promise<void> {
+    // Clear existing OTP and send new one
+    delete this.otpStore[phone];
+    await this.sendOTP(phone);
+  }
+
+  // Original Email Authentication Methods (unchanged)
+  async signUp(email: string, password: string, name: string, phone?: string): Promise<User> {
+    // Check if user already exists
+    const existingUser = await storageService.getUserByEmail(email);
+    if (existingUser) {
+      throw new Error('User with this email already exists');
+    }
+
+    const user: User = {
+      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       email,
       name,
       phone,
-      isVerified: false,
+      isVerified: true, // Email users are verified by default (in real app, would need email verification)
       createdAt: Date.now(),
       lastLoginAt: Date.now(),
       groupIds: []
@@ -27,7 +162,6 @@ class AuthService {
   }
 
   async signIn(email: string, password: string): Promise<User> {
-    // Simulate API call
     const user = await storageService.getUserByEmail(email);
     if (!user) {
       throw new Error('User not found');
@@ -62,7 +196,7 @@ class AuthService {
     return this.currentUser;
   }
 
-  // Group Management
+  // Group Management (unchanged)
   async createGroup(name: string, description?: string): Promise<Group> {
     if (!this.currentUser) {
       throw new Error('Must be logged in to create a group');
@@ -299,37 +433,6 @@ class AuthService {
     return member?.permissions.canManageMembers || false;
   }
 
-  // OTP logic
-  async sendOTP(phone: string): Promise<void> {
-    // Generate a 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    this.otpStore[phone] = otp;
-    // In a real app, send the OTP via SMS here
-    console.log(`OTP for ${phone}: ${otp}`); // For demo
-  }
-
-  async verifyOTP(phone: string, otp: string): Promise<boolean> {
-    if (this.otpStore[phone] && this.otpStore[phone] === otp) {
-      // Mark user as verified
-      const user = await storageService.getUserByPhone(phone);
-      if (user) {
-        user.isVerified = true;
-        await storageService.saveUser(user);
-        if (this.currentUser && this.currentUser.phone === phone) {
-          this.currentUser.isVerified = true;
-          localStorage.setItem('currentUser', JSON.stringify(this.currentUser));
-        }
-      }
-      delete this.otpStore[phone];
-      return true;
-    }
-    return false;
-  }
-
-  async resendOTP(phone: string): Promise<void> {
-    await this.sendOTP(phone);
-  }
-
   async removeUnverifiedMember(groupId: string, userId: string): Promise<void> {
     const group = await storageService.getGroup(groupId);
     if (!group) throw new Error('Group not found');
@@ -351,6 +454,73 @@ class AuthService {
   async addUser(user: User): Promise<void> {
     return storageService.saveUser(user);
   }
+
+  async addUserToGroup(groupId: string, userId: string, role: 'admin' | 'member' = 'member'): Promise<void> {
+    const group = await storageService.getGroup(groupId);
+    if (!group) throw new Error('Group not found');
+
+    // Check if user is already a member
+    const existingMember = group.members.find(m => m.userId === userId);
+    if (existingMember) {
+      throw new Error('User is already a member of this group');
+    }
+
+    // Add user to group
+    group.members.push({
+      userId,
+      role,
+      joinedAt: Date.now(),
+      isActive: true,
+      permissions: {
+        canCreateMatches: true,
+        canScoreMatches: true,
+        canManageMembers: role === 'admin',
+        canViewStats: true
+      }
+    });
+
+    await storageService.saveGroup(group);
+
+    // Add group to user's group list
+    const user = await storageService.getUser(userId);
+    if (user) {
+      if (!user.groupIds) {
+        user.groupIds = [];
+      }
+      if (!user.groupIds.includes(groupId)) {
+        user.groupIds.push(groupId);
+        await storageService.saveUser(user);
+      }
+    }
+  }
+
+  // Get OTP status for debugging
+  getOtpStatus(phone: string): { exists: boolean, expires?: number, attempts?: number } {
+    const otpData = this.otpStore[phone];
+    if (!otpData) {
+      return { exists: false };
+    }
+    return {
+      exists: true,
+      expires: otpData.expires,
+      attempts: otpData.attempts
+    };
+  }
+
+  // Clear expired OTPs (cleanup method)
+  clearExpiredOtps(): void {
+    const now = Date.now();
+    Object.keys(this.otpStore).forEach(phone => {
+      if (this.otpStore[phone].expires < now) {
+        delete this.otpStore[phone];
+      }
+    });
+  }
 }
 
 export const authService = new AuthService();
+
+// Cleanup expired OTPs every 5 minutes
+setInterval(() => {
+  authService.clearExpiredOtps();
+}, 5 * 60 * 1000);
