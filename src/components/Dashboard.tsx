@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Trophy, TrendingUp, Target, Award, Users, Download, Upload, User, RefreshCw, MessageCircle, Share2, AlertCircle, Cloud, CloudOff, Wifi, WifiOff } from 'lucide-react';
+import { Trophy, TrendingUp, Target, Award, Users, Download, Upload, User, RefreshCw, MessageCircle, Share2, AlertCircle, Cloud, CloudOff, Wifi, WifiOff, Search, ArrowLeft } from 'lucide-react';
 import { Player, Match } from '../types/cricket';
 import { PlayerDashboard } from './PlayerDashboard';
 import { DetailedScorecardModal } from './DetailedScorecardModal';
@@ -15,12 +15,14 @@ interface DashboardProps {
   onResumeMatch?: (match: Match) => void;
 }
 
-type View = 'main' | 'player' | 'group';
+type View = 'main' | 'player' | 'player-selection' | 'group';
 
 export const Dashboard: React.FC<DashboardProps> = ({ onBack, onResumeMatch }) => {
   const [view, setView] = useState<View>('main');
   const [matches, setMatches] = useState<Match[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [filteredPlayers, setFilteredPlayers] = useState<Player[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [showDetailedScorecard, setShowDetailedScorecard] = useState(false);
   const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
@@ -35,7 +37,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBack, onResumeMatch }) =
     lastSync?: Date;
   }>({ online: false, firebaseWorking: false });
   const [syncing, setSyncing] = useState(false);
-  const [showBackupModal, setShowBackupModal] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -52,6 +53,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBack, onResumeMatch }) =
       
       setMatches(sortedMatches);
       setPlayers(storedPlayers);
+      setFilteredPlayers(storedPlayers);
       
       // Check for incomplete matches
       await checkForIncompleteMatches();
@@ -97,6 +99,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBack, onResumeMatch }) =
             }
           });
           setPlayers(mergedPlayers);
+          setFilteredPlayers(mergedPlayers);
         }
       }
     } catch (error) {
@@ -180,6 +183,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBack, onResumeMatch }) =
     }
   };
 
+  // Filter players based on search term
+  useEffect(() => {
+    if (searchTerm.trim() === '') {
+      setFilteredPlayers(players);
+    } else {
+      const filtered = players.filter(player =>
+        player.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (player.shortId && player.shortId.toLowerCase().includes(searchTerm.toLowerCase()))
+      );
+      setFilteredPlayers(filtered);
+    }
+  }, [searchTerm, players]);
+
   useEffect(() => {
     loadData();
     return () => {
@@ -216,13 +232,53 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBack, onResumeMatch }) =
     setView('group');
   };
 
+  const handlePlayerSelectionView = () => {
+    setView('player-selection');
+    setSearchTerm('');
+  };
+
   const handleBackToMain = () => {
     setView('main');
     setSelectedPlayer(null);
+    setSearchTerm('');
   };
 
   const handleDismissResume = () => {
     setShowResumePrompt(false);
+  };
+
+  // Calculate player stats for display
+  const getPlayerDisplayStats = (player: Player) => {
+    const playerMatches = matches.filter(match => 
+      match.team1.players.some(p => p.id === player.id) || 
+      match.team2.players.some(p => p.id === player.id)
+    );
+
+    let totalRuns = 0;
+    let totalWickets = 0;
+    let totalMatches = playerMatches.length;
+
+    playerMatches.forEach(match => {
+      const battingBalls = match.balls.filter(b => b.striker.id === player.id);
+      const bowlingBalls = match.balls.filter(b => b.bowler.id === player.id);
+      
+      totalRuns += battingBalls.reduce((sum, ball) => {
+        if (!ball.isWide && !ball.isNoBall && !ball.isBye && !ball.isLegBye) {
+          return sum + ball.runs;
+        }
+        return sum;
+      }, 0);
+      
+      totalWickets += bowlingBalls.filter(b => b.isWicket && b.wicketType !== 'run_out').length;
+    });
+
+    return {
+      matches: totalMatches,
+      runs: totalRuns,
+      wickets: totalWickets,
+      average: totalMatches > 0 ? (totalRuns / totalMatches).toFixed(1) : '0.0',
+      motmAwards: playerMatches.filter(m => m.manOfTheMatch?.id === player.id).length
+    };
   };
 
   const renderError = () => (
@@ -266,6 +322,138 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBack, onResumeMatch }) =
     </div>
   );
 
+  const renderPlayerSelection = () => (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-8">
+          <button
+            onClick={handleBackToMain}
+            className="flex items-center p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5 text-gray-600 mr-2" />
+            <span className="text-gray-600">Back to Dashboard</span>
+          </button>
+          <h1 className="text-2xl font-bold text-gray-900">Player Statistics</h1>
+          <div className="w-32"></div>
+        </div>
+
+        {/* Search Bar */}
+        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search players by name or ID..."
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+        </div>
+
+        {/* Players Grid */}
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold text-gray-900">
+              All Players ({filteredPlayers.length})
+            </h2>
+            <div className="text-sm text-gray-500">
+              Click on any player to view detailed statistics
+            </div>
+          </div>
+
+          {filteredPlayers.length === 0 ? (
+            <div className="text-center py-12">
+              <User className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                {searchTerm ? 'No players found' : 'No players available'}
+              </h3>
+              <p className="text-gray-600">
+                {searchTerm 
+                  ? 'Try adjusting your search terms' 
+                  : 'Players will appear here after they participate in matches'
+                }
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredPlayers.map((player) => {
+                const stats = getPlayerDisplayStats(player);
+                return (
+                  <button
+                    key={player.id}
+                    onClick={() => handlePlayerSelect(player)}
+                    className="bg-gray-50 hover:bg-gray-100 rounded-xl p-6 text-left transition-all duration-200 hover:shadow-md border border-gray-200 hover:border-blue-300"
+                  >
+                    <div className="flex items-center space-x-4 mb-4">
+                      <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+                        {player.photoUrl ? (
+                          <img
+                            src={player.photoUrl}
+                            alt={player.name}
+                            className="w-full h-full object-cover rounded-full"
+                          />
+                        ) : (
+                          <span className="text-white font-bold text-lg">
+                            {player.name.charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-gray-900">{player.name}</h3>
+                        {player.shortId && (
+                          <p className="text-sm text-gray-500">ID: {player.shortId}</p>
+                        )}
+                        <div className="flex items-center space-x-2 mt-1">
+                          {player.isGroupMember && (
+                            <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">
+                              Member
+                            </span>
+                          )}
+                          {player.isGuest && (
+                            <span className="px-2 py-1 bg-orange-100 text-orange-700 text-xs rounded-full">
+                              Guest
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="text-center">
+                        <div className="font-bold text-lg text-blue-600">{stats.matches}</div>
+                        <div className="text-gray-600">Matches</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="font-bold text-lg text-green-600">{stats.runs}</div>
+                        <div className="text-gray-600">Runs</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="font-bold text-lg text-red-600">{stats.wickets}</div>
+                        <div className="text-gray-600">Wickets</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="font-bold text-lg text-yellow-600">{stats.motmAwards}</div>
+                        <div className="text-gray-600">MOTM</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600">Avg per match:</span>
+                        <span className="font-semibold text-gray-900">{stats.average} runs</span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   const renderMainView = () => (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
@@ -274,7 +462,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBack, onResumeMatch }) =
             onClick={onBack}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            <RefreshCw className="w-5 h-5 text-gray-600" />
+            <ArrowLeft className="w-5 h-5 text-gray-600" />
           </button>
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
           <div className="flex items-center space-x-2">
@@ -504,7 +692,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBack, onResumeMatch }) =
           </button>
 
           <button
-            onClick={() => setView('player')}
+            onClick={handlePlayerSelectionView}
             className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow"
           >
             <div className="flex items-center space-x-4">
@@ -536,6 +724,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBack, onResumeMatch }) =
   return (
     <>
       {view === 'main' && renderMainView()}
+      {view === 'player-selection' && renderPlayerSelection()}
       {view === 'player' && selectedPlayer && (
         <PlayerDashboard
           onBack={handleBackToMain}
