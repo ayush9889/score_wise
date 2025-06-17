@@ -219,6 +219,7 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
     updatedMatch.battingTeam.balls = 0;
     updatedMatch.battingTeam.wickets = 0;
     updatedMatch.battingTeam.extras = { wides: 0, noBalls: 0, byes: 0, legByes: 0 };
+    updatedMatch.battingTeam.fallOfWickets = [];
     
     // Clear current players for new selection
     updatedMatch.currentStriker = undefined;
@@ -258,7 +259,9 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
       const completedMatch = {
         ...match,
         isCompleted: true,
-        endTime: new Date().toISOString()
+        endTime: new Date().toISOString(),
+        winner: CricketEngine.getMatchResult(match).split(' won ')[0] || 'Unknown',
+        manOfTheMatch: CricketEngine.calculateManOfTheMatch(match)
       };
       
       await storageService.saveMatchState(completedMatch);
@@ -271,6 +274,10 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
 
   const handleScoreUpdate = (ball: Ball) => {
     console.log(`\n🏏 PROCESSING BALL: ${ball.runs} runs by ${ball.striker.name} off ${ball.bowler.name}`);
+    
+    // Add innings and batting team info to ball
+    ball.innings = match.isSecondInnings ? 2 : 1;
+    ball.battingTeamId = match.battingTeam.id || (match.isSecondInnings ? match.team2.id : match.team1.id);
     
     // Add to action history for undo functionality
     setActionHistory([...actionHistory, ball]);
@@ -428,9 +435,13 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
       updatedMatch.battingTeam.extras.legByes -= lastBall.runs;
     }
 
-    // Revert wickets
+    // Revert wickets and Fall of Wickets
     if (lastBall.isWicket) {
       updatedMatch.battingTeam.wickets--;
+      // Remove the last fall of wicket entry
+      if (updatedMatch.battingTeam.fallOfWickets && updatedMatch.battingTeam.fallOfWickets.length > 0) {
+        updatedMatch.battingTeam.fallOfWickets.pop();
+      }
     }
 
     // Revert ball count and overs
@@ -906,25 +917,11 @@ export const LiveScorer: React.FC<LiveScorerProps> = ({
 
       {/* Scorecard Modal */}
       {showScorecard && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        >
-          <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-bold">Full Scorecard</h2>
-              <button
-                onClick={() => setShowScorecard(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            <DetailedScorecardModal match={match} isOpen={showScorecard} onClose={() => setShowScorecard(false)} />
-          </div>
-        </motion.div>
+        <DetailedScorecardModal
+          match={match}
+          isOpen={showScorecard}
+          onClose={() => setShowScorecard(false)}
+        />
       )}
 
       {/* Add Player Modal */}

@@ -31,6 +31,15 @@ export interface PlayerStats {
   bestBowlingFigures: string;
 }
 
+export interface FallOfWicket {
+  wicketNumber: number;
+  score: number;
+  batsman: string;
+  over: string;
+  bowler: string;
+  wicketType: string;
+}
+
 export interface Team {
   name: string;
   players: Player[];
@@ -44,6 +53,7 @@ export interface Team {
     wides: number;
     noBalls: number;
   };
+  fallOfWickets?: FallOfWicket[];
 }
 
 export interface Ball {
@@ -63,6 +73,8 @@ export interface Ball {
   fielder?: Player;
   commentary: string;
   timestamp: number;
+  innings?: number; // Track which innings this ball belongs to
+  battingTeamId?: string; // Track which team was batting
 }
 
 export type WicketType = 'bowled' | 'caught' | 'lbw' | 'run_out' | 'stumped' | 'hit_wicket';
@@ -82,6 +94,7 @@ export interface Match {
   isSecondInnings?: boolean;
   firstInningsScore?: number;
   winner?: string;
+  resultMargin?: string; // e.g., "5 wickets", "23 runs"
   manOfTheMatch?: Player;
   startTime: number;
   endTime?: number;

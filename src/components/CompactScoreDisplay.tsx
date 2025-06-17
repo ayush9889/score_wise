@@ -1,5 +1,6 @@
 import React from 'react';
 import { Match } from '../types/cricket';
+import { CricketEngine } from '../services/cricketEngine';
 
 interface CompactScoreDisplayProps {
   match: Match;
@@ -83,8 +84,23 @@ export const CompactScoreDisplay: React.FC<CompactScoreDisplayProps> = ({ match 
   const nonStrikerStats = match.currentNonStriker ? calculateBatsmanStats(match.currentNonStriker) : null;
   const bowlerStats = match.currentBowler ? calculateBowlerStats(match.currentBowler) : null;
 
+  // Get match result if completed
+  const matchResult = match.isCompleted ? CricketEngine.getMatchResult(match) : null;
+
   return (
     <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
+      {/* Match Result (if completed) */}
+      {matchResult && (
+        <div className="bg-gradient-to-r from-green-500 to-blue-500 text-white p-4 rounded-lg mb-4 text-center">
+          <div className="text-lg font-bold">{matchResult}</div>
+          {match.manOfTheMatch && (
+            <div className="text-sm mt-1 opacity-90">
+              Man of the Match: {match.manOfTheMatch.name}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Toss Info */}
       <div className="text-sm text-red-500 mb-2 font-medium">
         {match.tossWinner} opt to {match.tossDecision}

@@ -186,9 +186,27 @@ export class CricketEngine {
       updatedMatch.battingTeam.extras.legByes += ball.runs;
     }
     
-    // Handle wickets
+    // Handle wickets and Fall of Wickets
     if (ball.isWicket) {
       updatedMatch.battingTeam.wickets++;
+      
+      // Add to Fall of Wickets
+      if (!updatedMatch.battingTeam.fallOfWickets) {
+        updatedMatch.battingTeam.fallOfWickets = [];
+      }
+      
+      const wicketNumber = updatedMatch.battingTeam.wickets;
+      const currentScore = updatedMatch.battingTeam.score;
+      const currentOver = `${updatedMatch.battingTeam.overs}.${updatedMatch.battingTeam.balls + (ball.isWide || ball.isNoBall ? 0 : 1)}`;
+      
+      updatedMatch.battingTeam.fallOfWickets.push({
+        wicketNumber,
+        score: currentScore,
+        batsman: ball.striker.name,
+        over: currentOver,
+        bowler: ball.bowler.name,
+        wicketType: ball.wicketType || 'out'
+      });
     }
     
     // Update ball count (only for valid deliveries)
@@ -236,27 +254,55 @@ export class CricketEngine {
     return updatedMatch;
   }
 
-  // Get match result
+  // Get proper cricket match result
   static getMatchResult(match: Match): string {
     if (!match.isCompleted) {
       return 'Match in progress';
     }
 
-    // If both teams have batted
-    if (match.team1 && match.team2 && typeof match.team1.score === 'number' && typeof match.team2.score === 'number') {
-      // Team 2 chased
-      if (match.team2.score > match.team1.score) {
-        const wicketsRemaining = 10 - match.team2.wickets;
-        return `${match.team2.name} won by ${wicketsRemaining} wicket${wicketsRemaining === 1 ? '' : 's'}`;
-      } else if (match.team2.score < match.team1.score) {
-        const runsMargin = match.team1.score - match.team2.score;
-        return `${match.team1.name} won by ${runsMargin} run${runsMargin === 1 ? '' : 's'}`;
-      } else {
-        return 'Match tied';
-      }
+    // Determine which team batted first and second
+    let firstInningsTeam: Team;
+    let secondInningsTeam: Team;
+    let firstInningsScore: number;
+    let secondInningsScore: number;
+
+    // Check if we have proper team data
+    if (match.isSecondInnings) {
+      // Current batting team is chasing
+      secondInningsTeam = match.battingTeam;
+      firstInningsTeam = match.bowlingTeam;
+      firstInningsScore = match.firstInningsScore || firstInningsTeam.score;
+      secondInningsScore = secondInningsTeam.score;
+    } else {
+      // Use team1 and team2 data
+      firstInningsTeam = match.team1;
+      secondInningsTeam = match.team2;
+      firstInningsScore = firstInningsTeam.score;
+      secondInningsScore = secondInningsTeam.score;
     }
 
-    return 'Match completed';
+    // Calculate result based on cricket rules
+    if (secondInningsScore > firstInningsScore) {
+      // Team 2 (chasing team) won
+      const wicketsRemaining = 10 - secondInningsTeam.wickets;
+      const ballsRemaining = (match.totalOvers * 6) - (secondInningsTeam.overs * 6 + secondInningsTeam.balls);
+      
+      if (wicketsRemaining === 10) {
+        return `${secondInningsTeam.name} won by 10 wickets`;
+      } else {
+        return `${secondInningsTeam.name} won by ${wicketsRemaining} wicket${wicketsRemaining === 1 ? '' : 's'}`;
+      }
+    } else if (firstInningsScore > secondInningsScore) {
+      // Team 1 (batting first) won
+      const runsMargin = firstInningsScore - secondInningsScore;
+      return `${firstInningsTeam.name} won by ${runsMargin} run${runsMargin === 1 ? '' : 's'}`;
+    } else if (firstInningsScore === secondInningsScore) {
+      // Match tied
+      return 'Match tied';
+    } else {
+      // Fallback
+      return 'Match completed';
+    }
   }
 
   // Calculate comprehensive player stats with enhanced tracking
