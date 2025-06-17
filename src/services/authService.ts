@@ -436,12 +436,20 @@ class AuthService {
   async removeUnverifiedMember(groupId: string, userId: string): Promise<void> {
     const group = await storageService.getGroup(groupId);
     if (!group) throw new Error('Group not found');
+    
     const memberIndex = group.members.findIndex(m => m.userId === userId);
     if (memberIndex === -1) throw new Error('Member not found');
+    
     const user = await storageService.getUser(userId);
     if (user && !user.isVerified) {
       group.members.splice(memberIndex, 1);
       await storageService.saveGroup(group);
+      
+      // Remove group from user's group list
+      if (user.groupIds) {
+        user.groupIds = user.groupIds.filter(gId => gId !== groupId);
+        await storageService.saveUser(user);
+      }
     } else {
       throw new Error('Cannot remove a verified member');
     }

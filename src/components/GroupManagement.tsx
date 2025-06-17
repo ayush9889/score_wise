@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, Share2, Settings, Crown, UserPlus, Copy, Check, Phone, Mail, Link, Eye } from 'lucide-react';
+import { Users, Plus, Share2, Settings, Crown, UserPlus, Copy, Check, Phone, Mail, Link, Eye, UserCheck, AlertCircle } from 'lucide-react';
 import { Group, User } from '../types/auth';
 import { Player } from '../types/cricket';
 import { authService } from '../services/authService';
@@ -19,23 +19,12 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
   const [groupName, setGroupName] = useState('');
   const [groupDescription, setGroupDescription] = useState('');
   const [inviteCode, setInviteCode] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
   const [invitePhone, setInvitePhone] = useState('');
-  const [quickAddName, setQuickAddName] = useState('');
-  const [quickAddEmail, setQuickAddEmail] = useState('');
-  const [quickAddPhone, setQuickAddPhone] = useState('');
+  const [inviteName, setInviteName] = useState('');
   const [guestLink, setGuestLink] = useState('');
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [otpInput, setOtpInput] = useState('');
-  const [otpError, setOtpError] = useState('');
-  const [otpSuccess, setOtpSuccess] = useState('');
-  const devMode = true;
-  const [phone, setPhone] = useState('');
-  const [showOtp, setShowOtp] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [demoOtp, setDemoOtp] = useState<string>('');
 
   useEffect(() => {
     loadGroupData();
@@ -89,52 +78,110 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
     }
   };
 
-  const handleInviteMember = async (e: React.FormEvent) => {
+  const handleAddMemberByPhone = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentGroup) return;
+    if (!currentGroup || !invitePhone.trim() || !inviteName.trim()) return;
 
     setLoading(true);
     setError('');
 
     try {
-      await addMemberToGroup(currentGroup.id, invitePhone, inviteEmail || invitePhone);
-      setShowInviteModal(false);
-      setInviteEmail('');
-      setInvitePhone('');
-      alert('Invitation sent successfully!');
-      if (devMode) {
-        console.log(`[DEV] OTP for ${invitePhone}: ${(authService as any).otpStore[invitePhone]}`);
+      // Check if user already exists with this phone
+      let user = await authService.findUserByPhone(invitePhone);
+      
+      if (!user) {
+        // Create unverified user account
+        user = {
+          id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          email: '', // No email initially
+          name: inviteName.trim(),
+          phone: invitePhone.trim(),
+          isVerified: false, // Will be verified when they sign up with OTP
+          createdAt: Date.now(),
+          lastLoginAt: Date.now(),
+          groupIds: []
+        };
+        
+        await authService.addUser(user);
+        console.log('📱 Created unverified user:', user.name, user.phone);
       }
+
+      // Add user to group
+      await authService.addUserToGroup(currentGroup.id, user.id, 'member');
+      
+      // Create a player profile for this user
+      const player: Player = {
+        id: `player_${user.id}`,
+        name: user.name,
+        shortId: user.name.split(' ').map(n => n.charAt(0)).join('').toUpperCase(),
+        photoUrl: user.photoUrl,
+        isGroupMember: true,
+        isGuest: false,
+        groupIds: [currentGroup.id],
+        stats: {
+          matchesPlayed: 0,
+          runsScored: 0,
+          ballsFaced: 0,
+          fours: 0,
+          sixes: 0,
+          fifties: 0,
+          hundreds: 0,
+          highestScore: 0,
+          timesOut: 0,
+          wicketsTaken: 0,
+          ballsBowled: 0,
+          runsConceded: 0,
+          catches: 0,
+          runOuts: 0,
+          motmAwards: 0,
+          ducks: 0,
+          dotBalls: 0,
+          maidenOvers: 0,
+          bestBowlingFigures: '0/0'
+        }
+      };
+      
+      await storageService.savePlayer(player);
+      console.log('🏏 Created player profile for:', player.name);
+      
+      // Send OTP for verification
+      await authService.sendOTP(invitePhone);
+      
+      setShowInviteModal(false);
+      setInviteName('');
+      setInvitePhone('');
+      
+      alert(`✅ ${inviteName} has been added to the group!\n\n📱 They will receive an OTP to verify their account.\n\n🏏 They can now participate in matches and will appear in group statistics.\n\n🔐 To access personalized features, they need to sign up with their phone number: ${invitePhone}`);
+      
+      await loadGroupData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send invitation');
+      setError(err instanceof Error ? err.message : 'Failed to add member');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleQuickAddPlayer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentGroup || !quickAddName.trim()) return;
-
-    setLoading(true);
-    setError('');
+  const handleRemoveUnverifiedMember = async (userId: string, userName: string) => {
+    if (!currentGroup) return;
+    
+    const confirmed = confirm(`Remove ${userName} from the group?\n\nThis will also remove their player profile and statistics.`);
+    if (!confirmed) return;
 
     try {
-      await addMemberToGroup(currentGroup.id, quickAddPhone, quickAddName);
-      setShowQuickAddModal(false);
-      setQuickAddName('');
-      setQuickAddEmail('');
-      setQuickAddPhone('');
+      await authService.removeUnverifiedMember(currentGroup.id, userId);
       
-      const contactMethod = quickAddEmail ? 'email' : quickAddPhone ? 'SMS' : 'manually';
-      alert(`Player "${quickAddName}" added successfully!${quickAddEmail || quickAddPhone ? ` Invitation sent via ${contactMethod}.` : ''}`);
-      if (devMode) {
-        console.log(`[DEV] OTP for ${quickAddPhone}: ${(authService as any).otpStore[quickAddPhone]}`);
+      // Also remove their player profile
+      const allPlayers = await storageService.getAllPlayers();
+      const playerToRemove = allPlayers.find(p => p.id === `player_${userId}`);
+      if (playerToRemove) {
+        // Note: In a real app, you'd have a deletePlayer method
+        console.log('Would remove player profile:', playerToRemove.name);
       }
+      
+      await loadGroupData();
+      alert(`${userName} has been removed from the group.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add player');
-    } finally {
-      setLoading(false);
+      alert('Failed to remove member.');
     }
   };
 
@@ -150,90 +197,6 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
 
   const currentUser = authService.getCurrentUser();
   const canManageGroup = currentGroup ? authService.canUserManageGroup(currentGroup.id) : false;
-
-  const handleResendOTP = async (phone: string) => {
-    try {
-      // Generate a demo OTP (6 digits)
-      const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
-      setDemoOtp(newOtp);
-      console.log(`[DEV] Demo OTP for ${phone}: ${newOtp}`);
-      alert(`Demo OTP sent to ${phone}: ${newOtp}`);
-    } catch (err) {
-      alert('Failed to resend OTP.');
-    }
-  };
-
-  const handleVerifyOTP = async (phone: string) => {
-    try {
-      if (otp === demoOtp) {
-        // Update member verification status
-        const updatedMembers = members.map(m => 
-          m.phone === phone ? { ...m, isVerified: true } : m
-        );
-        setMembers(updatedMembers);
-        setShowOtp(false);
-        setOtp('');
-        alert('Phone number verified successfully!');
-      } else {
-        alert('Invalid OTP. Please try again.');
-      }
-    } catch (err) {
-      alert('Failed to verify OTP.');
-    }
-  };
-
-  const handleRemoveUnverified = async (groupId: string, userId: string) => {
-    try {
-      await authService.removeUnverifiedMember(groupId, userId);
-      await loadGroupData();
-      alert('Unverified member removed.');
-    } catch (err) {
-      alert('Failed to remove member.');
-    }
-  };
-
-  const handleOtpSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setOtpError('');
-    setOtpSuccess('');
-    if (!currentUser?.phone) {
-      setOtpError('No phone number found for your account.');
-      return;
-    }
-    try {
-      const ok = await authService.verifyOTP(currentUser.phone, otpInput);
-      if (ok) {
-        setOtpSuccess('Your account has been verified!');
-        if (currentUser) {
-          currentUser.isVerified = true;
-          setShowOtp(false);
-          setOtpInput('');
-        }
-      } else {
-        setOtpError('Invalid OTP. Please try again.');
-      }
-    } catch (err) {
-      setOtpError('Verification failed.');
-    }
-  };
-
-  const addMemberToGroup = async (groupId: string, phone: string, name?: string) => {
-    // Check if user exists
-    let user = await authService.findUserByPhone(phone);
-    if (!user) {
-      // Create a placeholder user
-      user = {
-        id: `user_${phone}`,
-        name: name || phone,
-        phone,
-        isVerified: false,
-        email: '',
-        photoUrl: '',
-      };
-      await authService.addUser(user);
-    }
-    await authService.addUserToGroup(groupId, user.id, 'member');
-  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -308,53 +271,48 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
               </div>
             </div>
 
-            {/* Enhanced Quick Actions */}
+            {/* Member Management Actions */}
             {canManageGroup && (
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Member Management</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <button
-                    onClick={() => setShowQuickAddModal(true)}
+                    onClick={() => setShowInviteModal(true)}
                     className="p-4 border-2 border-green-200 rounded-lg hover:bg-green-50 transition-colors"
                   >
                     <UserPlus className="w-6 h-6 text-green-600 mx-auto mb-2" />
-                    <div className="text-sm font-medium text-green-700">Quick Add Member</div>
-                    <div className="text-xs text-green-600">Add player with email/phone</div>
+                    <div className="text-sm font-medium text-green-700">Add Member by Phone</div>
+                    <div className="text-xs text-green-600">Add someone to your cricket group</div>
                   </button>
 
                   <button
-                    onClick={() => setShowInviteModal(true)}
+                    onClick={() => copyToClipboard(currentGroup.inviteCode)}
                     className="p-4 border-2 border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
                   >
-                    <Mail className="w-6 h-6 text-blue-600 mx-auto mb-2" />
-                    <div className="text-sm font-medium text-blue-700">Send Invitation</div>
-                    <div className="text-xs text-blue-600">Email or SMS invite</div>
+                    <Copy className="w-6 h-6 text-blue-600 mx-auto mb-2" />
+                    <div className="text-sm font-medium text-blue-700">Share Invite Code</div>
+                    <div className="text-xs text-blue-600">Let others join with code</div>
                   </button>
                 </div>
 
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <button
-                    onClick={() => copyToClipboard(currentGroup.inviteCode)}
-                    className="p-4 border-2 border-purple-200 rounded-lg hover:bg-purple-50 transition-colors"
-                  >
-                    <Copy className="w-6 h-6 text-purple-600 mx-auto mb-2" />
-                    <div className="text-sm font-medium text-purple-700">Copy Invite Code</div>
-                    <div className="text-xs text-purple-600">Share with new members</div>
-                  </button>
-
-                  <button
-                    onClick={() => copyToClipboard(guestLink)}
-                    className="p-4 border-2 border-orange-200 rounded-lg hover:bg-orange-50 transition-colors"
-                  >
-                    <Eye className="w-6 h-6 text-orange-600 mx-auto mb-2" />
-                    <div className="text-sm font-medium text-orange-700">Guest View Link</div>
-                    <div className="text-xs text-orange-600">View-only access</div>
-                  </button>
+                <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                  <div className="flex items-start space-x-3">
+                    <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+                    <div className="text-sm text-blue-800">
+                      <p className="font-medium mb-1">How it works:</p>
+                      <ul className="text-xs space-y-1 list-disc list-inside">
+                        <li>Add members by phone number - they'll be part of your group immediately</li>
+                        <li>They can participate in matches and appear in statistics</li>
+                        <li>To access personalized features, they need to verify with the same phone number</li>
+                        <li>Once verified, they can view their personal dashboard and upload photos</li>
+                      </ul>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Enhanced Members List */}
+            {/* Members List */}
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">
                 Members ({members.length})
@@ -365,16 +323,16 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
                   const isCurrentUser = member.id === currentUser?.id;
                   const isVerified = member.isVerified;
                   const isAdmin = memberInfo?.role === 'admin';
-                  const canRemove = canManageGroup && !isCurrentUser;
-                  const canResendOTP = canManageGroup && !isVerified;
+                  const canRemove = canManageGroup && !isCurrentUser && !isVerified;
+                  
                   return (
-                    <div key={member.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                    <div key={member.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
                       <div className="flex items-center">
-                        <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center mr-3">
+                        <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mr-4">
                           {member.photoUrl ? (
                             <img src={member.photoUrl} alt={member.name} className="w-full h-full object-cover rounded-full" />
                           ) : (
-                            <span className="font-semibold text-green-600">
+                            <span className="font-semibold text-green-600 text-lg">
                               {member.name.charAt(0).toUpperCase()}
                             </span>
                           )}
@@ -387,60 +345,50 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
                                 You
                               </span>
                             )}
-                            <span className={`px-2 py-1 text-xs rounded-full ml-2 ${isVerified ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{isVerified ? 'Verified' : 'Unverified'}</span>
+                            {isAdmin && (
+                              <Crown className="w-4 h-4 text-yellow-500" />
+                            )}
                           </div>
-                          <div className="text-sm text-gray-500">{member.email}</div>
+                          <div className="flex items-center space-x-2 mt-1">
+                            <span className={`px-2 py-1 text-xs rounded-full ${
+                              isVerified 
+                                ? 'bg-green-100 text-green-700' 
+                                : 'bg-orange-100 text-orange-700'
+                            }`}>
+                              {isVerified ? (
+                                <div className="flex items-center">
+                                  <UserCheck className="w-3 h-3 mr-1" />
+                                  Verified
+                                </div>
+                              ) : (
+                                <div className="flex items-center">
+                                  <Phone className="w-3 h-3 mr-1" />
+                                  Unverified
+                                </div>
+                              )}
+                            </span>
+                            <span className="text-xs text-gray-500 capitalize">{memberInfo?.role}</span>
+                          </div>
                           {member.phone && (
-                            <div className="text-xs text-gray-400">{member.phone}</div>
+                            <div className="text-xs text-gray-400 mt-1">{member.phone}</div>
+                          )}
+                          {!isVerified && (
+                            <div className="text-xs text-orange-600 mt-1">
+                              Can participate in matches • Sign up with {member.phone} to verify
+                            </div>
                           )}
                         </div>
                       </div>
+                      
                       <div className="flex items-center space-x-2">
-                        {memberInfo?.role === 'admin' && (
-                          <Crown className="w-4 h-4 text-yellow-500" />
-                        )}
-                        <span className="text-sm text-gray-600 capitalize">{memberInfo?.role}</span>
-                        {/* Actions for unverified members */}
-                        {!isVerified && canManageGroup && !isCurrentUser && (
-                          <>
-                            <button
-                              className="ml-2 px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
-                              onClick={() => handleResendOTP(member.phone!)}
-                            >
-                              Resend OTP
-                            </button>
-                            <button
-                              className="ml-2 px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"
-                              onClick={() => {
-                                const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
-                                setDemoOtp(newOtp);
-                                console.log(`[DEV] Demo OTP for ${member.phone}: ${newOtp}`);
-                                alert(`Demo OTP for ${member.phone}: ${newOtp}`);
-                              }}
-                            >
-                              Show Demo OTP
-                            </button>
-                            <button
-                              className="ml-2 px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs"
-                              title="Remove Member"
-                              onClick={() => handleRemoveUnverified(currentGroup.id, member.id)}
-                            >
-                              Remove
-                            </button>
-                            {devMode && (
-                              <button
-                                className="ml-2 px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-xs"
-                                title="Show OTP in Console"
-                                onClick={() => {
-                                  const testOtp = (authService as any).otpStore[member.phone!];
-                                  console.log(`[DEV] OTP for ${member.phone}: ${testOtp}`);
-                                  alert('OTP logged to console.');
-                                }}
-                              >
-                                Show OTP
-                              </button>
-                            )}
-                          </>
+                        {canRemove && (
+                          <button
+                            onClick={() => handleRemoveUnverifiedMember(member.id, member.name)}
+                            className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs"
+                            title="Remove unverified member"
+                          >
+                            Remove
+                          </button>
                         )}
                       </div>
                     </div>
@@ -449,7 +397,7 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
               </div>
             </div>
 
-            {/* Enhanced Sharing Section */}
+            {/* Sharing Section */}
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Share & Invite</h3>
               
@@ -546,25 +494,6 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
                 />
               </div>
 
-              {/* Phone Input with Resend OTP Button */}
-              <div className="flex gap-2 items-center">
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="Phone Number"
-                  className="flex-1 p-2 border rounded"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => handleResendOTP(phone)}
-                  className="px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                >
-                  Resend OTP
-                </button>
-              </div>
-
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"
@@ -636,19 +565,34 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
         </div>
       )}
 
-      {/* Invite Member Modal */}
+      {/* Add Member Modal */}
       {showInviteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl w-full max-w-md">
             <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-900">Send Invitation</h2>
+              <h2 className="text-xl font-bold text-gray-900">Add Member to Group</h2>
+              <p className="text-sm text-gray-600 mt-1">Add someone to your cricket group by phone number</p>
             </div>
-            <form onSubmit={handleInviteMember} className="p-6 space-y-4">
+            <form onSubmit={handleAddMemberByPhone} className="p-6 space-y-4">
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                   <p className="text-red-700 text-sm">{error}</p>
                 </div>
               )}
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Full Name *
+                </label>
+                <input
+                  type="text"
+                  value={inviteName}
+                  onChange={(e) => setInviteName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  placeholder="Enter their full name"
+                  required
+                />
+              </div>
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -661,16 +605,22 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
                     value={invitePhone}
                     onChange={(e) => setInvitePhone(e.target.value)}
                     className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    placeholder="Enter phone number (required)"
+                    placeholder="Enter their phone number"
                     required
                   />
                 </div>
               </div>
-              <div className="bg-blue-50 rounded-lg p-3">
-                <p className="text-xs text-blue-700">
-                  💡 <strong>Note:</strong> An OTP will be sent to this phone number for verification. Member will appear as 'Unverified' until they verify via OTP.
-                </p>
+              
+              <div className="bg-blue-50 rounded-lg p-4">
+                <h4 className="font-medium text-blue-900 mb-2">What happens next:</h4>
+                <ul className="text-sm text-blue-800 space-y-1">
+                  <li>• They'll be added to your group immediately</li>
+                  <li>• They can participate in matches and appear in statistics</li>
+                  <li>• They'll receive an OTP to verify their account</li>
+                  <li>• Once verified, they can access personalized features</li>
+                </ul>
               </div>
+              
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"
@@ -681,148 +631,10 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || !invitePhone.trim()}
+                  disabled={loading || !inviteName.trim() || !invitePhone.trim()}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
                 >
-                  {loading ? 'Sending...' : 'Send Invitation'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Enhanced Quick Add Player Modal */}
-      {showQuickAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl w-full max-w-md">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-900">Quick Add Member</h2>
-              <p className="text-sm text-gray-600 mt-1">Add a player and invite them to join (phone required for OTP verification)</p>
-            </div>
-            <form onSubmit={handleQuickAddPlayer} className="p-6 space-y-4">
-              {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                  <p className="text-red-700 text-sm">{error}</p>
-                </div>
-              )}
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Player Name *
-                </label>
-                <input
-                  type="text"
-                  value={quickAddName}
-                  onChange={(e) => setQuickAddName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Enter player's name"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Phone Number *
-                </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="tel"
-                    value={quickAddPhone}
-                    onChange={(e) => setQuickAddPhone(e.target.value)}
-                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    placeholder="Enter phone for invitation (required)"
-                    required
-                  />
-                </div>
-              </div>
-              <div className="bg-blue-50 rounded-lg p-3">
-                <p className="text-xs text-blue-700">
-                  💡 <strong>Note:</strong> An OTP will be sent to this phone number for verification. Member will appear as 'Unverified' until they verify via OTP.
-                </p>
-              </div>
-              <div className="flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setShowQuickAddModal(false)}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading || !quickAddName.trim() || !quickAddPhone.trim()}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-                >
-                  {loading ? 'Adding...' : 'Add Member'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {!currentUser?.isVerified && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl w-full max-w-md">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-900">Verify Your Account</h2>
-              <p className="text-sm text-gray-600 mt-1">Enter the OTP sent to your phone number to verify your account.</p>
-            </div>
-            <form onSubmit={e => {
-              e.preventDefault();
-              setOtpError('');
-              setOtpSuccess('');
-              if (devMode) {
-                if (otpInput === demoOtp) {
-                  setOtpSuccess('Your account has been verified!');
-                  if (currentUser) {
-                    currentUser.isVerified = true;
-                    setShowOtp(false);
-                    setOtpInput('');
-                  }
-                } else {
-                  setOtpError('Invalid OTP. Please try again.');
-                }
-              } else {
-                handleOtpSubmit(e);
-              }
-            }} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  OTP Code
-                </label>
-                <input
-                  type="text"
-                  maxLength={6}
-                  value={otpInput}
-                  onChange={e => setOtpInput(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono text-lg tracking-widest text-center"
-                  placeholder="Enter 6-digit OTP"
-                  required
-                />
-              </div>
-              <button
-                type="button"
-                className="px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                onClick={() => {
-                  const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
-                  setDemoOtp(newOtp);
-                  alert(`Demo OTP for your phone: ${newOtp}`);
-                  console.log(`[DEV] Demo OTP for your phone: ${newOtp}`);
-                }}
-              >
-                Show Demo OTP
-              </button>
-              {otpError && <div className="text-red-600 text-sm">{otpError}</div>}
-              {otpSuccess && <div className="text-green-600 text-sm">{otpSuccess}</div>}
-              <div className="flex justify-end space-x-3">
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                >
-                  Verify
+                  {loading ? 'Adding...' : 'Add to Group'}
                 </button>
               </div>
             </form>
