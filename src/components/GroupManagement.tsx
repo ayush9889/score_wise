@@ -31,13 +31,19 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
   }, []);
 
   const loadGroupData = async () => {
-    const group = authService.getCurrentGroup();
-    setCurrentGroup(group);
-    
-    if (group) {
-      const groupMembers = await authService.getGroupMembers(group.id);
-      setMembers(groupMembers);
-      setGuestLink(authService.generateGuestLink(group.id));
+    try {
+      const group = authService.getCurrentGroup();
+      console.log('📋 Loading group data:', group?.name || 'No group');
+      setCurrentGroup(group);
+      
+      if (group) {
+        const groupMembers = await authService.getGroupMembers(group.id);
+        setMembers(groupMembers);
+        setGuestLink(authService.generateGuestLink(group.id));
+        console.log('👥 Loaded group members:', groupMembers.length);
+      }
+    } catch (error) {
+      console.error('Failed to load group data:', error);
     }
   };
 
@@ -47,13 +53,24 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
     setError('');
 
     try {
+      console.log('🏗️ Creating group:', groupName);
       const group = await authService.createGroup(groupName, groupDescription);
+      console.log('✅ Group created successfully:', group.name);
+      
+      // CRITICAL FIX: Update the current group state immediately
       setCurrentGroup(group);
+      
+      // Close the modal
       setShowCreateGroup(false);
       setGroupName('');
       setGroupDescription('');
+      
+      // Reload group data to ensure everything is in sync
       await loadGroupData();
+      
+      console.log('🎉 Group creation complete, staying on group management page');
     } catch (err) {
+      console.error('❌ Failed to create group:', err);
       setError(err instanceof Error ? err.message : 'Failed to create group');
     } finally {
       setLoading(false);
@@ -66,12 +83,23 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
     setError('');
 
     try {
+      console.log('🤝 Joining group with code:', inviteCode);
       const group = await authService.joinGroup(inviteCode);
+      console.log('✅ Successfully joined group:', group.name);
+      
+      // CRITICAL FIX: Update the current group state immediately
       setCurrentGroup(group);
+      
+      // Close the modal
       setShowJoinGroup(false);
       setInviteCode('');
+      
+      // Reload group data to ensure everything is in sync
       await loadGroupData();
+      
+      console.log('🎉 Group join complete, staying on group management page');
     } catch (err) {
+      console.error('❌ Failed to join group:', err);
       setError(err instanceof Error ? err.message : 'Failed to join group');
     } finally {
       setLoading(false);
@@ -86,6 +114,8 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
     setError('');
 
     try {
+      console.log('📱 Adding member by phone:', inviteName, invitePhone);
+      
       // Check if user already exists with this phone
       let user = await authService.findUserByPhone(invitePhone);
       
@@ -147,14 +177,20 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
       // Send OTP for verification
       await authService.sendOTP(invitePhone);
       
+      // Close modal and reset form
       setShowInviteModal(false);
       setInviteName('');
       setInvitePhone('');
       
+      // Show success message
       alert(`✅ ${inviteName} has been added to the group!\n\n📱 They will receive an OTP to verify their account.\n\n🏏 They can now participate in matches and will appear in group statistics.\n\n🔐 To access personalized features, they need to sign up with their phone number: ${invitePhone}`);
       
+      // CRITICAL FIX: Reload group data to show the new member
       await loadGroupData();
+      
+      console.log('✅ Member added successfully, group data reloaded');
     } catch (err) {
+      console.error('❌ Failed to add member:', err);
       setError(err instanceof Error ? err.message : 'Failed to add member');
     } finally {
       setLoading(false);
@@ -178,6 +214,7 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
         console.log('Would remove player profile:', playerToRemove.name);
       }
       
+      // CRITICAL FIX: Reload group data to reflect the removal
       await loadGroupData();
       alert(`${userName} has been removed from the group.`);
     } catch (err) {
@@ -197,6 +234,14 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ onBack }) => {
 
   const currentUser = authService.getCurrentUser();
   const canManageGroup = currentGroup ? authService.canUserManageGroup(currentGroup.id) : false;
+
+  // CRITICAL DEBUG: Log current state
+  console.log('🔍 GroupManagement render state:', {
+    hasCurrentGroup: !!currentGroup,
+    groupName: currentGroup?.name,
+    membersCount: members.length,
+    currentUser: currentUser?.name
+  });
 
   return (
     <div className="min-h-screen bg-gray-50">
