@@ -1,0 +1,551 @@
+import React, { useState, useEffect } from 'react';
+import { MatchSetup } from './components/MatchSetup';
+import { LiveScorer } from './components/LiveScorer';
+import { Dashboard } from './components/Dashboard';
+import { AuthModal } from './components/AuthModal';
+import { GroupManagement } from './components/GroupManagement';
+import { AdminDashboard } from './components/AdminDashboard';
+import { AddPlayerModal } from './components/AddPlayerModal';
+import { DetailedScorecardModal } from './components/DetailedScorecardModal';
+import { Match, Player } from './types/cricket';
+import { User, Group } from './types/auth';
+import { storageService } from './services/storage';
+import { authService } from './services/authService';
+import { PDFService } from './services/pdfService';
+import { Trophy, BarChart3, Play, Award, Users, UserPlus, LogIn, LogOut, Crown, Sparkles, Target, Zap, Shield, Share2, MessageCircle } from 'lucide-react';
+
+type AppState = 'home' | 'auth' | 'group-management' | 'admin-dashboard' | 'match-setup' | 'live-scoring' | 'dashboard' | 'match-complete';
+
+function App() {
+  const [currentState, setCurrentState] = useState<AppState>('home');
+  const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentGroup, setCurrentGroup] = useState<Group | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showAddPlayerModal, setShowAddPlayerModal] = useState(false);
+  const [showDetailedScorecard, setShowDetailedScorecard] = useState(false);
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+
+  useEffect(() => {
+    initializeApp();
+  }, []);
+
+  const initializeApp = async () => {
+    try {
+      await storageService.init();
+      
+      // Check for existing user session
+      const user = authService.getCurrentUser();
+      if (user) {
+        setCurrentUser(user);
+        await authService.loadUserGroups();
+        const group = authService.getCurrentGroup();
+        if (group) {
+          setCurrentGroup(group);
+        }
+      }
+      
+      setIsInitialized(true);
+    } catch (error) {
+      console.error('Failed to initialize app:', error);
+      setIsInitialized(true); // Continue even if storage fails
+    }
+  };
+
+  const handleAuthSuccess = async () => {
+    const user = authService.getCurrentUser();
+    await authService.loadUserGroups();
+    const group = authService.getCurrentGroup();
+    setCurrentUser(user);
+    setCurrentGroup(group);
+    setShowAuthModal(false);
+    
+    if (!group) {
+      setCurrentState('group-management');
+    }
+  };
+
+  const handleSignOut = async () => {
+    await authService.signOut();
+    setCurrentUser(null);
+    setCurrentGroup(null);
+    setCurrentState('home');
+  };
+
+  const handleMatchStart = (match: Match) => {
+    setCurrentMatch(match);
+    setCurrentState('live-scoring');
+  };
+
+  const handleMatchComplete = (match: Match) => {
+    // Save completed match to local storage
+    try {
+      storageService.saveMatch(match);
+      console.log('Completed match saved to local storage');
+    } catch (error) {
+      console.error('Failed to save completed match to local storage:', error);
+    }
+    
+    setCurrentMatch(match);
+    setCurrentState('match-complete');
+  };
+
+  const handleBackToHome = () => {
+    setCurrentState('home');
+    setCurrentMatch(null);
+  };
+
+  const handlePlayerAdded = async (player: Player) => {
+    // Refresh any necessary data
+    console.log('Player added:', player);
+  };
+
+  if (!isInitialized) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="relative">
+            <div className="animate-spin rounded-full h-20 w-20 border-4 border-purple-500 border-t-transparent mx-auto mb-6"></div>
+            <div className="absolute inset-0 rounded-full h-20 w-20 border-4 border-transparent border-r-purple-400 animate-pulse"></div>
+          </div>
+          <p className="text-purple-200 text-lg font-medium">Initializing ScoreWise...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentState === 'home') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
+        {/* Animated Background Elements */}
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob"></div>
+          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000"></div>
+          <div className="absolute top-40 left-40 w-80 h-80 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-4000"></div>
+        </div>
+
+        {/* Header */}
+        <div className="relative z-10 pt-8 pb-6 px-6">
+          <div className="flex justify-between items-center max-w-6xl mx-auto">
+            <div className="flex items-center space-x-3">
+              <div className="bg-gradient-to-r from-purple-500 to-pink-500 p-2 rounded-xl">
+                <Trophy className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-white font-bold text-xl">ScoreWise</span>
+            </div>
+            
+            <div className="flex items-center space-x-3">
+              <button
+                onClick={() => setShowAddPlayerModal(true)}
+                className="p-3 bg-white/10 backdrop-blur-sm rounded-xl hover:bg-white/20 transition-all duration-300 border border-white/20"
+                title="Add Player"
+              >
+                <UserPlus className="w-5 h-5 text-white" />
+              </button>
+              
+              {currentUser ? (
+                <div className="flex items-center space-x-3">
+                  <button
+                    onClick={() => setCurrentState('admin-dashboard')}
+                    className="p-3 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-xl hover:shadow-lg hover:scale-105 transition-all duration-300"
+                    title="Admin Dashboard"
+                  >
+                    <Crown className="w-5 h-5 text-white" />
+                  </button>
+                  
+                  <div className="flex items-center space-x-3 bg-white/10 backdrop-blur-sm rounded-xl p-2 border border-white/20">
+                    <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                      {currentUser.photoUrl ? (
+                        <img src={currentUser.photoUrl} alt={currentUser.name} className="w-full h-full object-cover rounded-full" />
+                      ) : (
+                        <span className="text-white font-semibold text-sm">
+                          {currentUser.name.charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-white text-sm font-medium hidden sm:block">{currentUser.name}</span>
+                  </div>
+                  
+                  <button
+                    onClick={handleSignOut}
+                    className="p-3 bg-white/10 backdrop-blur-sm rounded-xl hover:bg-white/20 transition-all duration-300 border border-white/20"
+                    title="Sign Out"
+                  >
+                    <LogOut className="w-5 h-5 text-white" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setAuthMode('signin');
+                    setShowAuthModal(true);
+                  }}
+                  className="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl hover:shadow-lg hover:scale-105 transition-all duration-300 font-medium text-white"
+                >
+                  Sign In
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Hero Section */}
+        <div className="relative z-10 px-6 pb-12">
+          <div className="max-w-4xl mx-auto text-center">
+            <div className="mb-8">
+              <div className="inline-flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2 mb-6 border border-white/20">
+                <Sparkles className="w-4 h-4 text-yellow-400" />
+                <span className="text-white text-sm font-medium">Premium Cricket Scoring</span>
+              </div>
+              
+              <h1 className="text-5xl md:text-7xl font-bold text-white mb-6 leading-tight">
+                Score Like a
+                <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent"> Pro</span>
+              </h1>
+              
+              <p className="text-xl text-purple-200 mb-8 max-w-2xl mx-auto leading-relaxed">
+                The ultimate cricket scoring app for community matches. Fast, accurate, and beautifully designed.
+              </p>
+              
+              {currentUser && currentGroup && (
+                <div className="inline-flex items-center space-x-3 bg-white/10 backdrop-blur-sm rounded-xl p-4 mb-8 border border-white/20">
+                  <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                  <span className="text-white text-sm">Signed in as <span className="font-semibold">{currentUser.name}</span></span>
+                  <span className="text-purple-300 text-sm">•</span>
+                  <span className="text-purple-300 text-sm">{currentGroup.name}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Main Actions Grid */}
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto mb-16">
+              <button
+                onClick={() => {
+                  if (currentUser) {
+                    setCurrentState('match-setup');
+                  } else {
+                    setAuthMode('signin');
+                    setShowAuthModal(true);
+                  }
+                }}
+                className="group relative bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-left hover:bg-white/20 transition-all duration-500 border border-white/20 hover:border-purple-400/50 hover:scale-105"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                <div className="relative z-10">
+                  <div className="bg-gradient-to-r from-green-500 to-emerald-500 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                    <Play className="w-8 h-8 text-white" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-white mb-3">New Match</h3>
+                  <p className="text-purple-200 mb-4">Start scoring a new cricket match with professional precision</p>
+                  {!currentUser && (
+                    <div className="inline-flex items-center space-x-2 text-orange-300 text-sm">
+                      <Shield className="w-4 h-4" />
+                      <span>Sign in required</span>
+                    </div>
+                  )}
+                </div>
+              </button>
+
+              <button
+                onClick={() => setCurrentState('dashboard')}
+                className="group relative bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-left hover:bg-white/20 transition-all duration-500 border border-white/20 hover:border-blue-400/50 hover:scale-105"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-cyan-500/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                <div className="relative z-10">
+                  <div className="bg-gradient-to-r from-blue-500 to-cyan-500 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                    <BarChart3 className="w-8 h-8 text-white" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-white mb-3">Dashboard</h3>
+                  <p className="text-purple-200">View comprehensive stats, leaderboards & match history</p>
+                </div>
+              </button>
+
+              {currentUser && (
+                <>
+                  <button
+                    onClick={() => setCurrentState('admin-dashboard')}
+                    className="group relative bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-left hover:bg-white/20 transition-all duration-500 border border-white/20 hover:border-yellow-400/50 hover:scale-105"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="relative z-10">
+                      <div className="bg-gradient-to-r from-yellow-500 to-orange-500 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                        <Crown className="w-8 h-8 text-white" />
+                      </div>
+                      <h3 className="text-2xl font-bold text-white mb-3">Admin Panel</h3>
+                      <p className="text-purple-200">Manage groups & view personal statistics</p>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => setCurrentState('group-management')}
+                    className="group relative bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-left hover:bg-white/20 transition-all duration-500 border border-white/20 hover:border-purple-400/50 hover:scale-105"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="relative z-10">
+                      <div className="bg-gradient-to-r from-purple-500 to-pink-500 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                        <Users className="w-8 h-8 text-white" />
+                      </div>
+                      <h3 className="text-2xl font-bold text-white mb-3">Manage Group</h3>
+                      <p className="text-purple-200">Create or join cricket groups with ease</p>
+                    </div>
+                  </button>
+                </>
+              )}
+
+              {!currentUser && (
+                <button
+                  onClick={() => {
+                    setAuthMode('signup');
+                    setShowAuthModal(true);
+                  }}
+                  className="group relative bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-left hover:bg-white/20 transition-all duration-500 border border-white/20 hover:border-green-400/50 hover:scale-105"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-green-500/20 to-emerald-500/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                  <div className="relative z-10">
+                    <div className="bg-gradient-to-r from-green-500 to-emerald-500 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                      <Users className="w-8 h-8 text-white" />
+                    </div>
+                    <h3 className="text-2xl font-bold text-white mb-3">Join Community</h3>
+                    <p className="text-purple-200">Create account to manage groups & track statistics</p>
+                  </div>
+                </button>
+              )}
+            </div>
+
+            {/* Features Section */}
+            <div className="max-w-6xl mx-auto">
+              <div className="text-center mb-12">
+                <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">Built for Community Cricket</h2>
+                <p className="text-xl text-purple-200">Everything you need for local matches, tournaments & practice games</p>
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-8">
+                <div className="group bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-500 border border-white/20 hover:border-purple-400/50">
+                  <div className="bg-gradient-to-r from-green-500 to-emerald-500 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform duration-300">
+                    <Target className="w-8 h-8 text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-4">STRICT Match Format</h3>
+                  <p className="text-purple-200 leading-relaxed">Exactly N overs - no more, no less. Perfect format enforcement for fair play</p>
+                </div>
+
+                <div className="group bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-500 border border-white/20 hover:border-blue-400/50">
+                  <div className="bg-gradient-to-r from-blue-500 to-cyan-500 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform duration-300">
+                    <Zap className="w-8 h-8 text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-4">Smart Analytics</h3>
+                  <p className="text-purple-200 leading-relaxed">Automatic player tracking and personalized dashboards with insights</p>
+                </div>
+
+                <div className="group bg-white/10 backdrop-blur-sm rounded-2xl p-8 text-center hover:bg-white/20 transition-all duration-500 border border-white/20 hover:border-orange-400/50">
+                  <div className="bg-gradient-to-r from-orange-500 to-red-500 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform duration-300">
+                    <Award className="w-8 h-8 text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-4">Member Management</h3>
+                  <p className="text-purple-200 leading-relaxed">Email/phone invites, guest links, and comprehensive admin controls</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="text-center mt-16">
+              <div className="inline-flex items-center space-x-2 bg-white/10 backdrop-blur-sm rounded-full px-6 py-3 border border-white/20">
+                <Trophy className="w-5 h-5 text-yellow-400" />
+                <span className="text-purple-200 text-sm font-medium">Perfect for club matches, tournaments & practice games</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Auth Modal */}
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={handleAuthSuccess}
+          initialMode={authMode}
+        />
+
+        {/* Add Player Modal */}
+        <AddPlayerModal
+          isOpen={showAddPlayerModal}
+          onClose={() => setShowAddPlayerModal(false)}
+          onPlayerAdded={handlePlayerAdded}
+          groupId={currentGroup?.id}
+        />
+      </div>
+    );
+  }
+
+  if (currentState === 'admin-dashboard') {
+    return <AdminDashboard onBack={handleBackToHome} />;
+  }
+
+  if (currentState === 'group-management') {
+    return <GroupManagement onBack={handleBackToHome} />;
+  }
+
+  if (currentState === 'match-setup') {
+    return <MatchSetup onMatchStart={handleMatchStart} />;
+  }
+
+  if (currentState === 'live-scoring' && currentMatch) {
+    return (
+      <LiveScorer
+        match={currentMatch}
+        onMatchComplete={handleMatchComplete}
+        onBack={handleBackToHome}
+      />
+    );
+  }
+
+  if (currentState === 'dashboard') {
+    return <Dashboard onBack={handleBackToHome} />;
+  }
+
+  if (currentState === 'match-complete' && currentMatch) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Animated Background Elements */}
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob"></div>
+          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000"></div>
+          <div className="absolute top-40 left-40 w-80 h-80 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-4000"></div>
+        </div>
+
+        <div className="relative z-10 bg-white/10 backdrop-blur-sm rounded-3xl shadow-2xl p-8 w-full max-w-md border border-white/20">
+          <div className="bg-gradient-to-r from-green-500 to-emerald-500 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-8">
+            <Trophy className="w-10 h-10 text-white" />
+          </div>
+          
+          <h1 className="text-3xl font-bold text-white mb-6 text-center">Match Complete!</h1>
+          
+          {/* Match Result */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 mb-8 border border-white/20">
+            <div className="text-xl font-bold text-white mb-6 text-center">
+              {currentMatch.team1.name} vs {currentMatch.team2.name}
+            </div>
+            
+            <div className="space-y-4 mb-6">
+              <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl">
+                <span className="text-purple-200 font-medium">{currentMatch.team1.name}</span>
+                <span className="text-white font-bold text-lg">
+                  {currentMatch.team1.score}/{currentMatch.team1.wickets}
+                </span>
+                <span className="text-purple-300 text-sm">
+                  ({currentMatch.team1.overs}.{currentMatch.team1.balls})
+                </span>
+              </div>
+              <div className="flex justify-between items-center p-3 bg-white/5 rounded-xl">
+                <span className="text-purple-200 font-medium">{currentMatch.team2.name}</span>
+                <span className="text-white font-bold text-lg">
+                  {currentMatch.team2.score}/{currentMatch.team2.wickets}
+                </span>
+                <span className="text-purple-300 text-sm">
+                  ({currentMatch.team2.overs}.{currentMatch.team2.balls})
+                </span>
+              </div>
+            </div>
+            
+            <div className="text-center p-4 bg-gradient-to-r from-green-500/20 to-emerald-500/20 rounded-xl border border-green-400/30">
+              <div className="text-sm text-green-300 mb-2">Winner</div>
+              <div className="text-2xl font-bold text-green-400">{currentMatch.winner}</div>
+            </div>
+          </div>
+
+          {/* Man of the Match */}
+          {currentMatch.manOfTheMatch && (
+            <div className="bg-gradient-to-r from-yellow-500/20 to-orange-500/20 rounded-2xl p-6 mb-8 border border-yellow-400/30">
+              <div className="flex items-center justify-center mb-3">
+                <Award className="w-6 h-6 text-yellow-400 mr-2" />
+                <span className="font-bold text-yellow-300">Man of the Match</span>
+              </div>
+              <div className="text-xl font-bold text-white text-center">
+                {currentMatch.manOfTheMatch.name}
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="space-y-4">
+            {/* Share Buttons */}
+            <div className="flex space-x-3 mb-4">
+              <button
+                onClick={async () => {
+                  try {
+                    await PDFService.shareToWhatsApp(currentMatch);
+                  } catch (error) {
+                    console.error('Failed to share to WhatsApp:', error);
+                    alert('Failed to share to WhatsApp. Please try again.');
+                  }
+                }}
+                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 px-4 rounded-xl font-bold hover:shadow-lg hover:scale-105 transition-all duration-300 flex items-center justify-center"
+              >
+                <MessageCircle className="w-5 h-5 mr-2" />
+                Share to WhatsApp
+              </button>
+              
+              <button
+                onClick={async () => {
+                  try {
+                    await PDFService.shareScoreboard(currentMatch);
+                  } catch (error) {
+                    console.error('Failed to share scoreboard:', error);
+                    alert('Failed to share scoreboard. Please try again.');
+                  }
+                }}
+                className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white py-3 px-4 rounded-xl font-bold hover:shadow-lg hover:scale-105 transition-all duration-300 flex items-center justify-center"
+              >
+                <Share2 className="w-5 h-5 mr-2" />
+                Share Scoreboard
+              </button>
+            </div>
+            
+            <button
+              onClick={() => setShowDetailedScorecard(true)}
+              className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-4 px-6 rounded-xl font-bold hover:shadow-lg hover:scale-105 transition-all duration-300"
+            >
+              <BarChart3 className="w-5 h-5 inline mr-2" />
+              View Detailed Scorecard
+            </button>
+            
+            <button
+              onClick={() => setCurrentState('match-setup')}
+              className="w-full bg-gradient-to-r from-green-500 to-emerald-500 text-white py-4 px-6 rounded-xl font-bold hover:shadow-lg hover:scale-105 transition-all duration-300"
+            >
+              Start New Match
+            </button>
+            
+            <button
+              onClick={() => setCurrentState('dashboard')}
+              className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 text-white py-4 px-6 rounded-xl font-bold hover:shadow-lg hover:scale-105 transition-all duration-300"
+            >
+              View Dashboard
+            </button>
+            
+            <button
+              onClick={handleBackToHome}
+              className="w-full bg-white/10 backdrop-blur-sm text-white py-4 px-6 rounded-xl font-bold hover:bg-white/20 transition-all duration-300 border border-white/20"
+            >
+              Back to Home
+            </button>
+          </div>
+        </div>
+
+        {/* Detailed Scorecard Modal */}
+        {showDetailedScorecard && currentMatch && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
+            <DetailedScorecardModal
+              match={currentMatch}
+              isOpen={showDetailedScorecard}
+              onClose={() => setShowDetailedScorecard(false)}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+export default App;
